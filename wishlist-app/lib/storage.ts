@@ -1,43 +1,39 @@
-/**
- * Storage abstraction layer.
- * Uses Vercel KV in production, in-memory Map for local dev.
- */
-
 import { WishItem } from './types';
 
 const KV_KEY = 'wishlist:items';
-
-// In-memory fallback for local development
 const localStore = new Map<string, WishItem[]>();
 
-function isKVAvailable(): boolean {
-  return !!(
-    process.env.KV_REST_API_URL &&
-    process.env.KV_REST_API_TOKEN
-  );
+function isRedisAvailable(): boolean {
+  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+}
+
+async function getRedis() {
+  const { Redis } = await import('@upstash/redis');
+  return new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
 }
 
 export async function getAllItems(): Promise<WishItem[]> {
-  if (isKVAvailable()) {
-    const { kv } = await import('@vercel/kv');
-    const items = await kv.get<WishItem[]>(KV_KEY);
-    return items ?? [];
+  if (isRedisAvailable()) {
+    const redis = await getRedis();
+    return (await redis.get<WishItem[]>(KV_KEY)) ?? [];
   }
   return localStore.get(KV_KEY) ?? [];
 }
 
 export async function saveAllItems(items: WishItem[]): Promise<void> {
-  if (isKVAvailable()) {
-    const { kv } = await import('@vercel/kv');
-    await kv.set(KV_KEY, items);
+  if (isRedisAvailable()) {
+    const redis = await getRedis();
+    await redis.set(KV_KEY, items);
     return;
   }
   localStore.set(KV_KEY, items);
 }
 
 export async function getItemById(id: string): Promise<WishItem | null> {
-  const items = await getAllItems();
-  return items.find(item => item.id === id) ?? null;
+  return (await getAllItems()).find(i => i.id === id) ?? null;
 }
 
 export async function createItem(item: WishItem): Promise<WishItem> {
@@ -49,18 +45,18 @@ export async function createItem(item: WishItem): Promise<WishItem> {
 
 export async function updateItem(updated: WishItem): Promise<WishItem | null> {
   const items = await getAllItems();
-  const index = items.findIndex(item => item.id === updated.id);
-  if (index === -1) return null;
-  items[index] = updated;
+  const idx = items.findIndex(i => i.id === updated.id);
+  if (idx === -1) return null;
+  items[idx] = updated;
   await saveAllItems(items);
   return updated;
 }
 
 export async function deleteItem(id: string): Promise<boolean> {
   const items = await getAllItems();
-  const index = items.findIndex(item => item.id === id);
-  if (index === -1) return false;
-  items.splice(index, 1);
+  const idx = items.findIndex(i => i.id === id);
+  if (idx === -1) return false;
+  items.splice(idx, 1);
   await saveAllItems(items);
   return true;
 }
