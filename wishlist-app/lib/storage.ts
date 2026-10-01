@@ -3,15 +3,24 @@ import { WishItem } from './types';
 const KV_KEY = 'wishlist:items';
 const localStore = new Map<string, WishItem[]>();
 
+// Vercel's Upstash integration uses KV_REST_API_*, a manual setup uses
+// UPSTASH_REDIS_REST_*. We accept both.
+function getRedisUrl() {
+  return process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+}
+function getRedisToken() {
+  return process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+}
+
 function isRedisAvailable(): boolean {
-  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  return !!(getRedisUrl() && getRedisToken());
 }
 
 async function getRedis() {
   const { Redis } = await import('@upstash/redis');
   return new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    url: getRedisUrl()!,
+    token: getRedisToken()!,
   });
 }
 
@@ -28,6 +37,10 @@ export async function saveAllItems(items: WishItem[]): Promise<void> {
     const redis = await getRedis();
     await redis.set(KV_KEY, items);
     return;
+  }
+  // On Vercel, memory is wiped constantly, so saving there would silently lose data.
+  if (process.env.VERCEL) {
+    throw new Error('Database is not connected');
   }
   localStore.set(KV_KEY, items);
 }
